@@ -1,0 +1,8 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>tmpmail</title><style>body{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;max-width:800px;margin:8vh auto;padding:0 20px;line-height:1.55;background:#0e0f11;color:#e8e8e8}a{color:#9ecbff}pre{padding:18px;border:1px solid #333;border-radius:10px;overflow:auto;background:#15171a}.muted{color:#aaa}code{font-family:inherit}</style><main><h1>tmpmail</h1><p>Disposable email from the terminal. nvim-first navigation, live inbox polling, OTP and verification-link extraction.</p><pre>$ tmpmail
+
+tmpmail  tm9c12f0b4a@domain.example
+
+&gt; ● GitHub        Verify your email       738194
+  ● Linear        Sign in                 [magic link]
+
+j/k move · l open · Y address · n new · r refresh · ?</pre><h2>Install</h2><pre>curl -fsSL https://raw.githubusercontent.com/IFAKA/tmpmail/main/install.sh | sh</pre><p>Or, with Go:</p><pre>go install github.com/IFAKA/tmpmail/cmd/tmpmail@latest</pre><h2>Design</h2><p>Frequent operations stay on the home row. <code>y</code> smart-copies a high-confidence OTP or verification URL; ambiguous messages open a candidate picker instead of guessing.</p><p class="muted">Mail delivery is provided by Mail.tm. Disposable domains may be rejected by some websites.</p><p><a href="https://github.com/IFAKA/tmpmail">Source on GitHub</a></p></main></html>
