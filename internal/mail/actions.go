@@ -17,17 +17,20 @@ const (
 )
 
 type ActionCandidate struct {
-	Type     ActionType
-	Value    string
-	Score    int
-	Evidence string
+	Type       ActionType
+	Value      string
+	Score      int // retained for compatibility with the TUI; this is the confidence score.
+	Confidence int
+	Evidence   string
 }
 
 var (
-	codeRE    = regexp.MustCompile(`(?i)\b(?:[A-Z0-9]{4,12}|[A-Z0-9]{2,8}(?:-[A-Z0-9]{2,8})+)\b`)
-	urlRE     = regexp.MustCompile(`https?://[^\s<>'\"]+`)
-	contextRE = regexp.MustCompile(`(?i)\b(otp|one[- ]?time|verification|verify|security|login|sign[- ]?in|confirm|authentication|auth|passcode|code|device)\b`)
-	badRE     = regexp.MustCompile(`(?i)\b(order|invoice|price|amount|phone|ticket|year|copyright|unsubscribe|tracking)\b`)
+	codeRE       = regexp.MustCompile(`(?i)\b[A-Z0-9]{4,12}\b`)
+	segCodeRE    = regexp.MustCompile(`(?i)\b[A-Z0-9]{1,8}(?:-[A-Z0-9]{1,8})+\b`)
+	spacedCodeRE = regexp.MustCompile(`\b\d{1,4}(?: \d{1,4})+\b`)
+	urlRE        = regexp.MustCompile(`https?://[^\s<>'\"]+`)
+	contextRE    = regexp.MustCompile(`(?i)\b(otp|one[- ]?time|verification|verify|security|login|sign[- ]?in|confirm|authentication|auth|passcode|code|device)\b`)
+	badRE        = regexp.MustCompile(`(?i)\b(order|invoice|price|amount|phone|ticket|year|date|time|copyright|unsubscribe|tracking|total)\b`)
 )
 
 func normalizeCode(s string) string {
@@ -41,31 +44,41 @@ func normalizeCode(s string) string {
 func Extract(subject, text, htmlBody string) []ActionCandidate {
 	body := html.UnescapeString(subject + "\n" + text + "\n" + stripHTML(htmlBody))
 	var out []ActionCandidate
-	for _, idx := range codeRE.FindAllStringIndex(body, -1) {
-		raw := body[idx[0]:idx[1]]
+	addCode := func(raw string, start int) {
 		val := normalizeCode(raw)
-		if len(val) < 4 || len(val) > 12 || allLetters(val) {
-			continue
+		if !validCode(val) {
+			return
 		}
-		around := window(body, idx[0], 90)
-		score := 35
+		around := window(body, start, 90)
+		score := 20
 		ev := "code-shaped token"
 		if contextRE.MatchString(around) {
-			score += 45
+			score += 50
 			ev = "near verification/login language"
 		}
 		if badRE.MatchString(around) {
-			score -= 35
+			score -= 60
 		}
 		if strings.Contains(strings.ToUpper(subject), val) {
 			score += 15
 			ev += "; appears in subject"
 		}
-		out = append(out, ActionCandidate{Code, val, score, ev})
+		if score >= 50 {
+			out = append(out, ActionCandidate{Type: Code, Value: val, Score: score, Confidence: score, Evidence: ev})
+		}
+	}
+	for _, idx := range codeRE.FindAllStringIndex(body, -1) {
+		addCode(body[idx[0]:idx[1]], idx[0])
+	}
+	for _, idx := range segCodeRE.FindAllStringIndex(body, -1) {
+		addCode(body[idx[0]:idx[1]], idx[0])
+	}
+	for _, idx := range spacedCodeRE.FindAllStringIndex(body, -1) {
+		addCode(body[idx[0]:idx[1]], idx[0])
 	}
 	for _, raw := range urlRE.FindAllString(body, -1) {
 		u := strings.TrimRight(raw, ".,);]")
-		score := 35
+		score := 20
 		ev := "URL in message"
 		l := strings.ToLower(u)
 		if strings.Contains(l, "verify") || strings.Contains(l, "confirm") || strings.Contains(l, "login") || strings.Contains(l, "signin") || strings.Contains(l, "token") || strings.Contains(l, "magic") {
@@ -75,13 +88,41 @@ func Extract(subject, text, htmlBody string) []ActionCandidate {
 		if strings.Contains(l, "unsubscribe") || strings.Contains(l, "track") {
 			score -= 50
 		}
-		if parsed, e := url.Parse(u); e == nil && parsed.Scheme != "" && parsed.Host != "" {
-			out = append(out, ActionCandidate{Link, u, score, ev})
+		if parsed, e := url.Parse(u); e == nil && parsed.Scheme != "" && parsed.Host != "" && score > 0 {
+			out = append(out, ActionCandidate{Type: Link, Value: u, Score: score, Confidence: score, Evidence: ev})
 		}
 	}
 	out = dedupe(out)
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Score > out[j].Score })
 	return out
+}
+func validCode(s string) bool {
+	if len(s) < 4 || len(s) > 12 || allLetters(s) {
+		return false
+	}
+	allDigits := true
+	for _, r := range s {
+		if !unicode.IsDigit(r) {
+			allDigits = false
+			break
+		}
+	}
+	if allDigits {
+		return len(s) == 4 || len(s) == 6 || len(s) == 8
+	}
+	// Short mixed tokens in newsletters and tracking templates (for example
+	// 24PX) are not useful verification codes. Unsegmented mixed codes need
+	// enough numeric signal to be credible; segmented forms are handled by
+	// the stronger context around the token.
+	digits, letters := 0, 0
+	for _, r := range s {
+		if unicode.IsDigit(r) {
+			digits++
+		} else if unicode.IsLetter(r) {
+			letters++
+		}
+	}
+	return digits >= 3 && letters >= 1
 }
 func allLetters(s string) bool {
 	for _, r := range s {

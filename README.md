@@ -1,6 +1,8 @@
-# tmpmail
+# tmpmail — keyboard-first temporary email TUI
 
-A disposable-email TUI built for keyboard-first/nvim users.
+`tmpmail` is a fast, keyboard-first temporary email client for the terminal. It creates disposable Mail.tm inboxes, copies the generated email address, polls for incoming messages, and extracts OTP codes, verification links, magic links, and other useful sign-in actions.
+
+Built for Vim and Neovim users, developers, QA engineers, automation workflows, and anyone who needs a disposable email address without leaving the command line.
 
 `tmpmail` creates a temporary Mail.tm inbox, copies the address to your clipboard, polls for incoming mail, and extracts likely OTPs, magic links, verification links, and confirmation actions.
 
@@ -28,13 +30,25 @@ go install github.com/IFAKA/tmpmail/cmd/tmpmail@latest
 tmpmail
 ```
 
-On startup it creates a mailbox and copies its address.
+On startup it creates a temporary mailbox and copies its address to your clipboard. The TUI is designed for an 80×24 terminal and remains usable in smaller windows.
+
+## Features
+
+- Keyboard-driven Bubble Tea interface with Vim-style navigation.
+- Automatic temporary mailbox creation and polling through Mail.tm.
+- Clipboard support for mailbox addresses, OTPs, verification URLs, and magic links.
+- Ranked action candidates with confidence scores and an explicit picker for ambiguous results.
+- Readable HTML fallback for HTML-only email.
+- Cached inbox and message access during provider outages.
+- Loading, reconnecting, rate-limit, expired-mailbox, and startup-error states.
+- Search, raw/source view, scrolling, Unicode text, and responsive terminal layout.
 
 ### Inbox keys
 
 | Key | Action |
 |---|---|
 | `j` / `k` | next / previous |
+| `Ctrl-d` / `Ctrl-u` | half-page down / up |
 | `g` / `G` | first / last |
 | `l` / `Enter` | open message |
 | `Y` | copy mailbox address |
@@ -85,7 +99,7 @@ Scores are raised by nearby verification/authentication language and reduced for
 
 ## Development
 
-Requires Go 1.23+. The TUI runtime intentionally uses only the Go standard library plus common system tools (`stty` and the platform clipboard command), so there are no Go runtime dependencies to download.
+Requires Go 1.24+. The TUI uses Bubble Tea, Bubbles, and Lip Gloss, plus common system tools (`stty` and the platform clipboard command).
 
 ```sh
 make test
@@ -123,7 +137,7 @@ message MIME/text/HTML
     ↓
 action extractor
     ↓
-ActionCandidate { type, value, score, evidence }
+ActionCandidate { type, value, confidence, evidence }
     ↓
 smart copy or explicit candidate picker
 ```

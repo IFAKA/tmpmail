@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,11 +27,14 @@ type Client struct {
 func New() *Client { return &Client{base: defaultBase, hc: &http.Client{Timeout: 12 * time.Second}} }
 
 type apiError struct {
-	Status int
-	Body   string
+	Status      int
+	Body        string
+	RetryAfterD time.Duration
 }
 
-func (e apiError) Error() string { return fmt.Sprintf("mail.tm HTTP %d: %s", e.Status, e.Body) }
+func (e apiError) Error() string             { return fmt.Sprintf("mail.tm HTTP %d: %s", e.Status, e.Body) }
+func (e apiError) StatusCode() int           { return e.Status }
+func (e apiError) RetryAfter() time.Duration { return e.RetryAfterD }
 
 func (c *Client) req(ctx context.Context, method, path, token string, body any, out any) error {
 	var r io.Reader
@@ -59,7 +63,13 @@ func (c *Client) req(ctx context.Context, method, path, token string, body any, 
 	defer res.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(res.Body, 2<<20))
 	if res.StatusCode < 200 || res.StatusCode > 204 {
-		return apiError{res.StatusCode, strings.TrimSpace(string(b))}
+		retryAfter := time.Duration(0)
+		if value := res.Header.Get("Retry-After"); value != "" {
+			if seconds, parseErr := strconv.Atoi(strings.TrimSpace(value)); parseErr == nil {
+				retryAfter = time.Duration(seconds) * time.Second
+			}
+		}
+		return apiError{Status: res.StatusCode, Body: strings.TrimSpace(string(b)), RetryAfterD: retryAfter}
 	}
 	if out != nil && len(b) > 0 {
 		return json.Unmarshal(b, out)
@@ -76,24 +86,34 @@ func randomHex(n int) string {
 }
 
 func (c *Client) CreateMailbox(ctx context.Context) (provider.Mailbox, error) {
-	var domains struct {
+	var domains json.RawMessage
+	if err := c.req(ctx, http.MethodGet, "/domains?page=1", "", nil, &domains); err != nil {
+		return provider.Mailbox{}, err
+	}
+	var members []struct {
+		Domain   string `json:"domain"`
+		IsActive bool   `json:"isActive"`
+	}
+	var collection struct {
 		Members []struct {
 			Domain   string `json:"domain"`
 			IsActive bool   `json:"isActive"`
 		} `json:"hydra:member"`
 	}
-	if err := c.req(ctx, http.MethodGet, "/domains?page=1", "", nil, &domains); err != nil {
-		return provider.Mailbox{}, err
+	if err := json.Unmarshal(domains, &collection); err == nil && collection.Members != nil {
+		members = collection.Members
+	} else if err := json.Unmarshal(domains, &members); err != nil {
+		return provider.Mailbox{}, fmt.Errorf("invalid domains response: %w", err)
 	}
 	domain := ""
-	for _, d := range domains.Members {
+	for _, d := range members {
 		if d.IsActive {
 			domain = d.Domain
 			break
 		}
 	}
-	if domain == "" && len(domains.Members) > 0 {
-		domain = domains.Members[0].Domain
+	if domain == "" && len(members) > 0 {
+		domain = members[0].Domain
 	}
 	if domain == "" {
 		return provider.Mailbox{}, errors.New("provider returned no domains")
@@ -128,14 +148,21 @@ func sender(r rawSummary) string {
 }
 func parsedTime(s string) time.Time { t, _ := time.Parse(time.RFC3339, s); return t }
 func (c *Client) ListMessages(ctx context.Context, mb provider.Mailbox) ([]provider.MessageSummary, error) {
-	var v struct {
-		Members []rawSummary `json:"hydra:member"`
-	}
-	if err := c.req(ctx, http.MethodGet, "/messages?page=1", mb.Token, nil, &v); err != nil {
+	var raw json.RawMessage
+	if err := c.req(ctx, http.MethodGet, "/messages?page=1", mb.Token, nil, &raw); err != nil {
 		return nil, err
 	}
-	out := make([]provider.MessageSummary, 0, len(v.Members))
-	for _, m := range v.Members {
+	var members []rawSummary
+	var collection struct {
+		Members []rawSummary `json:"hydra:member"`
+	}
+	if err := json.Unmarshal(raw, &collection); err == nil && collection.Members != nil {
+		members = collection.Members
+	} else if err := json.Unmarshal(raw, &members); err != nil {
+		return nil, fmt.Errorf("invalid messages response: %w", err)
+	}
+	out := make([]provider.MessageSummary, 0, len(members))
+	for _, m := range members {
 		out = append(out, provider.MessageSummary{ID: m.ID, From: sender(m), Subject: m.Subject, Intro: m.Intro, Seen: m.Seen, CreatedAt: parsedTime(m.CreatedAt)})
 	}
 	return out, nil

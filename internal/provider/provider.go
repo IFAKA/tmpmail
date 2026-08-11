@@ -5,6 +5,14 @@ import (
 	"time"
 )
 
+// HTTPError is implemented by providers that can report an HTTP failure
+// without making the TUI depend on provider-specific types.
+type HTTPError interface {
+	error
+	StatusCode() int
+	RetryAfter() time.Duration
+}
+
 type Mailbox struct{ ID, Address, Password, Token string }
 type MessageSummary struct {
 	ID, From, Subject, Intro string
