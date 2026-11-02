@@ -151,3 +151,11 @@ Temporary inboxes are not private long-term identity infrastructure. Messages ar
 ## License
 
 MIT.
+
+---
+
+## Support
+
+If this project is useful to you, you can support my work:
+
+[![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/zfaka)
